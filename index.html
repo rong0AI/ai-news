@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 每日新聞摘要</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --ink: #1a1a1a; --ink-mid: #444; --ink-light: #888;
+      --rule: #e0e0e0; --accent: #c0392b; --bg: #fafaf8; --card: #ffffff;
+    }
+    body { font-family: 'Noto Sans TC', sans-serif; background: var(--bg); color: var(--ink); min-height: 100vh; }
+
+    header { background: var(--card); border-bottom: 2px solid var(--ink); padding: 0 clamp(1.5rem,5vw,4rem); position: sticky; top: 0; z-index: 100; }
+    .header-inner { max-width: 900px; margin: 0 auto; display: flex; align-items: baseline; justify-content: space-between; padding: 1.1rem 0; }
+    .masthead { font-family: 'Noto Serif TC', serif; font-weight: 700; font-size: 1.35rem; letter-spacing: .04em; color: var(--ink); text-decoration: none; }
+    .masthead span { color: var(--accent); }
+    #live-date { font-size: .75rem; color: var(--ink-light); letter-spacing: .06em; }
+
+    main { max-width: 900px; margin: 0 auto; padding: clamp(2rem,5vw,4rem) clamp(1.5rem,5vw,4rem); }
+
+    .issue-line { display: flex; align-items: center; gap: 1rem; margin-bottom: 2.5rem; opacity: 0; animation: fadeUp .5s .1s forwards; }
+    .issue-label { font-size: .7rem; letter-spacing: .12em; color: var(--accent); font-weight: 500; text-transform: uppercase; }
+    .issue-rule { flex: 1; height: 1px; background: var(--rule); }
+    .issue-date-text { font-size: .7rem; color: var(--ink-light); letter-spacing: .06em; }
+
+    .intro { margin-bottom: 3rem; opacity: 0; animation: fadeUp .5s .2s forwards; }
+    .intro h1 { font-family: 'Noto Serif TC', serif; font-size: clamp(1.6rem,4vw,2.4rem); font-weight: 700; line-height: 1.35; margin-bottom: .8rem; }
+    .intro .subtitle { font-size: .9rem; color: var(--ink-light); line-height: 1.7; }
+
+    #news-container { display: flex; flex-direction: column; }
+    .news-item { border-top: 1px solid var(--rule); padding: 2rem 0; display: grid; grid-template-columns: 2.5rem 1fr; gap: 0 1.5rem; opacity: 0; animation: fadeUp .5s forwards; }
+    .news-item:last-of-type { border-bottom: 1px solid var(--rule); }
+    .news-num { font-family: 'Noto Serif TC', serif; font-size: 1.5rem; font-weight: 700; color: var(--rule); line-height: 1; padding-top: .15rem; }
+    .news-headline { font-family: 'Noto Serif TC', serif; font-size: 1.1rem; font-weight: 700; line-height: 1.5; margin-bottom: .6rem; }
+    .news-summary { font-size: .875rem; color: var(--ink-mid); line-height: 1.85; margin-bottom: .8rem; }
+    .news-tag { display: inline-block; background: #f2f2f0; color: var(--ink-light); font-size: .68rem; letter-spacing: .08em; padding: .2em .7em; border-radius: 2px; }
+
+    .trend-block { margin-top: 3rem; border-top: 2px solid var(--ink); padding-top: 2rem; opacity: 0; animation: fadeUp .5s .3s forwards; }
+    .trend-label { font-size: .7rem; letter-spacing: .12em; color: var(--accent); font-weight: 500; text-transform: uppercase; margin-bottom: 1rem; }
+    .trend-text { font-size: .95rem; color: var(--ink-mid); line-height: 2; }
+
+    /* Skeleton */
+    .skel { background: linear-gradient(90deg,#ebebeb 25%,#f5f5f5 50%,#ebebeb 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 3px; height: 1em; margin-bottom: .6em; display: block; }
+    .skel.s { width: 35%; } .skel.m { width: 65%; }
+
+    footer { border-top: 1px solid var(--rule); padding: 2rem clamp(1.5rem,5vw,4rem); text-align: center; }
+    .footer-inner { max-width: 900px; margin: 0 auto; font-size: .72rem; color: var(--ink-light); letter-spacing: .04em; }
+
+    @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+    @media(max-width:520px){ .news-item{grid-template-columns:1.8rem 1fr;gap:0 1rem} .news-num{font-size:1.1rem} }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <a class="masthead" href="#">AI<span>Daily</span></a>
+    <span id="live-date"></span>
+  </div>
+</header>
+
+<main>
+  <div class="issue-line">
+    <span class="issue-label">每日摘要</span>
+    <span class="issue-rule"></span>
+    <span id="issue-date-text" class="issue-date-text"></span>
+  </div>
+  <div class="intro">
+    <h1>今日 AI 產業動態</h1>
+    <p class="subtitle">每天早上 08:00 自動彙整 · 由 GPT-4o 精選摘要</p>
+  </div>
+
+  <div id="news-container">
+    <!-- skeleton placeholder -->
+    <div class="news-item" style="animation-delay:.25s">
+      <div class="news-num" style="color:#e0e0e0">01</div>
+      <div><span class="skel m"></span><span class="skel"></span><span class="skel s"></span></div>
+    </div>
+    <div class="news-item" style="animation-delay:.35s">
+      <div class="news-num" style="color:#e0e0e0">02</div>
+      <div><span class="skel m"></span><span class="skel"></span><span class="skel s"></span></div>
+    </div>
+    <div class="news-item" style="animation-delay:.45s">
+      <div class="news-num" style="color:#e0e0e0">03</div>
+      <div><span class="skel m"></span><span class="skel"></span><span class="skel s"></span></div>
+    </div>
+  </div>
+
+  <div class="trend-block" id="trend-block">
+    <div class="trend-label">趨勢觀察</div>
+    <p class="trend-text" id="trend-text">
+      <span class="skel"></span><span class="skel m"></span>
+    </p>
+  </div>
+</main>
+
+<footer>
+  <div class="footer-inner">
+    資料來源：TechNews 科技新聞 &nbsp;·&nbsp; 由 GPT-4o 自動摘要 &nbsp;·&nbsp;
+    <span id="footer-time"></span>
+  </div>
+</footer>
+
+<script>
+  // 日期顯示
+  const now = new Date();
+  const locale = 'zh-TW';
+  document.getElementById('live-date').textContent =
+    now.toLocaleDateString(locale, { year:'numeric', month:'2-digit', day:'2-digit' });
+  document.getElementById('issue-date-text').textContent =
+    now.toLocaleDateString(locale, { year:'numeric', month:'long', day:'numeric', weekday:'short' });
+
+  // 載入 news.json
+  fetch('news.json?t=' + Date.now())
+    .then(r => r.json())
+    .then(data => {
+      // 渲染新聞
+      const container = document.getElementById('news-container');
+      container.innerHTML = data.items.map((item, i) => `
+        <div class="news-item" style="animation-delay:${0.25 + i * 0.1}s">
+          <div class="news-num">${String(i + 1).padStart(2, '0')}</div>
+          <div class="news-body">
+            <div class="news-headline">${item.headline}</div>
+            <div class="news-summary">${item.summary}</div>
+            <span class="news-tag">${item.tag}</span>
+          </div>
+        </div>
+      `).join('');
+
+      // 渲染趨勢
+      document.getElementById('trend-text').textContent = data.trend;
+
+      // 更新時間
+      document.getElementById('footer-time').textContent =
+        '最後更新：' + (data.date || now.toLocaleDateString(locale));
+    })
+    .catch(() => {
+      document.getElementById('news-container').innerHTML =
+        '<p style="padding:2rem;color:#888">今日資料載入失敗，請稍後再試。</p>';
+    });
+</script>
+</body>
+</html>
