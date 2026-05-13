@@ -50,6 +50,30 @@
     footer { border-top: 1px solid var(--rule); padding: 2rem clamp(1.5rem,5vw,4rem); text-align: center; }
     .footer-inner { max-width: 900px; margin: 0 auto; font-size: .72rem; color: var(--ink-light); letter-spacing: .04em; }
 
+    /* Update button */
+    .update-btn {
+      display: inline-flex; align-items: center; gap: .4rem;
+      background: var(--ink); color: #fff; border: none;
+      font-family: inherit; font-size: .75rem; font-weight: 500; letter-spacing: .06em;
+      padding: .55rem 1rem; border-radius: 3px; cursor: pointer;
+      transition: background .2s, opacity .2s;
+    }
+    .update-btn:hover:not(:disabled) { background: var(--accent); }
+    .update-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .update-btn .spin {
+      width: .8rem; height: .8rem; border: 2px solid #fff; border-top-color: transparent;
+      border-radius: 50%; display: none; animation: rotate .8s linear infinite;
+    }
+    .update-btn.loading .spin { display: inline-block; }
+    .update-btn.loading .icon { display: none; }
+    @keyframes rotate { to { transform: rotate(360deg); } }
+
+    #update-status {
+      font-size: .72rem; color: var(--ink-light); margin-left: .8rem; letter-spacing: .04em;
+    }
+    #update-status.err { color: var(--accent); }
+    #update-status.ok { color: #2e7d32; }
+
     @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
     @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
     @media(max-width:520px){ .news-item{grid-template-columns:1.8rem 1fr;gap:0 1rem} .news-num{font-size:1.1rem} }
@@ -69,6 +93,15 @@
     <span class="issue-label">每日摘要</span>
     <span class="issue-rule"></span>
     <span id="issue-date-text" class="issue-date-text"></span>
+  </div>
+
+  <div style="display:flex;align-items:center;margin-bottom:2rem;flex-wrap:wrap;gap:.5rem">
+    <button id="update-btn" class="update-btn" type="button">
+      <span class="spin" aria-hidden="true"></span>
+      <span class="icon" aria-hidden="true">↻</span>
+      <span class="label">更新今日最新 AI 新聞</span>
+    </button>
+    <span id="update-status"></span>
   </div>
   <div class="intro">
     <h1>今日 AI 產業動態</h1>
@@ -115,34 +148,263 @@
   document.getElementById('issue-date-text').textContent =
     now.toLocaleDateString(locale, { year:'numeric', month:'long', day:'numeric', weekday:'short' });
 
-  // 載入 news.json
-  fetch('news.json?t=' + Date.now())
-    .then(r => r.json())
-    .then(data => {
-      // 渲染新聞
-      const container = document.getElementById('news-container');
-      container.innerHTML = data.items.map((item, i) => `
-        <div class="news-item" style="animation-delay:${0.25 + i * 0.1}s">
+  // 簡單的 HTML 跳脫，避免 API 文字注入
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // 從摘要末尾抓「關鍵字：xxx」作為 tag（若無則回傳預設）
+  function extractTag(text) {
+    if (!text) return 'AI';
+    const m = String(text).match(/關鍵字[:：]\s*([^。\n]+)/);
+    if (m && m[1]) {
+      const first = m[1].split(/[、,，\/／]/)[0].trim().replace(/。\s*$/, '');
+      if (first) return first;
+    }
+    return 'AI';
+  }
+
+  // 把新聞資料渲染到頁面
+  function renderNews(items, trend, dateStr) {
+    const container = document.getElementById('news-container');
+    if (!items || !items.length) {
+      container.innerHTML = '<p style="padding:2rem;color:#888">沒有可顯示的新聞。</p>';
+    } else {
+      container.innerHTML = items.map((item, i) => `
+        <div class="news-item" style="animation-delay:${0.05 + i * 0.08}s">
           <div class="news-num">${String(i + 1).padStart(2, '0')}</div>
           <div class="news-body">
-            <div class="news-headline">${item.headline}</div>
-            <div class="news-summary">${item.summary}</div>
-            <span class="news-tag">${item.tag}</span>
+            <div class="news-headline">${escapeHtml(item.headline)}</div>
+            <div class="news-summary">${escapeHtml(item.summary)}</div>
+            <span class="news-tag">${escapeHtml(item.tag)}</span>
           </div>
         </div>
       `).join('');
+    }
 
-      // 渲染趨勢
-      document.getElementById('trend-text').textContent = data.trend;
+    if (trend) {
+      document.getElementById('trend-text').textContent = trend;
+    }
 
-      // 更新時間
-      document.getElementById('footer-time').textContent =
-        '最後更新：' + (data.date || now.toLocaleDateString(locale));
+    document.getElementById('footer-time').textContent =
+      '最後更新：' + (dateStr || now.toLocaleDateString(locale));
+  }
+
+  // 載入本地 news.json（初始顯示）
+  fetch('news.json?t=' + Date.now())
+    .then(r => r.json())
+    .then(data => {
+      renderNews(data.items, data.trend, data.date);
     })
     .catch(() => {
       document.getElementById('news-container').innerHTML =
         '<p style="padding:2rem;color:#888">今日資料載入失敗，請稍後再試。</p>';
     });
+
+  /* ====== 自動更新：呼叫 Webhook API ====== */
+  const WEBHOOK_URL = 'https://agentify.qoca.net/api/v1/agent_designer/webhook/fda17af4-77ad-4e56-bbf1-a59bd6212394/webhook_input_1778652767908';
+  const RESULT_URL  = 'https://agentify.qoca.net/api/v1/agent_designer/webhook/result/';
+  const API_KEY     = 'Bearer 8bfIKGPQ8KNP8FIZpV0rNCZ3rdm7ciEAEokl3oLX7RY';
+  const POLL_INTERVAL_MS = 3000;
+  const POLL_TIMEOUT_MS  = 120000; // 2 分鐘超時
+
+  const updateBtn    = document.getElementById('update-btn');
+  const updateStatus = document.getElementById('update-status');
+
+  function setStatus(msg, kind) {
+    updateStatus.textContent = msg || '';
+    updateStatus.className = kind || '';
+  }
+
+  function setLoading(on) {
+    if (on) {
+      updateBtn.classList.add('loading');
+      updateBtn.disabled = true;
+      updateBtn.querySelector('.label').textContent = '更新中…';
+    } else {
+      updateBtn.classList.remove('loading');
+      updateBtn.disabled = false;
+      updateBtn.querySelector('.label').textContent = '更新今日最新 AI 新聞';
+    }
+  }
+
+  // 把 API 回傳的 ai_news 物件 ({id_1, title_1, conten_1/content_1, ...}) 轉成 items 陣列
+  function parseAiNews(aiNews) {
+    if (!aiNews || typeof aiNews !== 'object') return [];
+    // 收集所有編號
+    const indices = new Set();
+    Object.keys(aiNews).forEach(k => {
+      const m = k.match(/_(\d+)$/);
+      if (m) indices.add(parseInt(m[1], 10));
+    });
+    const sorted = Array.from(indices).sort((a, b) => a - b);
+
+    return sorted.map(n => {
+      const title = aiNews[`title_${n}`] || '';
+      // 容忍 API 的 typo：可能是 content_N 或 conten_N
+      const content = aiNews[`content_${n}`] || aiNews[`conten_${n}`] || '';
+      return {
+        headline: title,
+        summary: content,
+        tag: extractTag(content),
+      };
+    }).filter(it => it.headline || it.summary);
+  }
+
+  // 從 POST 回應裡找出真正用來查結果的 task_id
+  // （API 文件雖然寫 request_id，但實測 request_id 是 POST 本身的 ID，
+  //   真正的 task_id 通常放在 data.task_id 之類的欄位裡）
+  function pickTaskId(json) {
+    if (!json || typeof json !== 'object') return null;
+    const data = json.data && typeof json.data === 'object' ? json.data : {};
+    // 依優先順序嘗試常見的欄位名稱
+    const candidates = [
+      data.task_id,
+      data.taskId,
+      data.id,
+      data.execution_id,
+      data.executionId,
+      data.request_id,   // 有些版本會把 task_id 放在 data.request_id
+      json.task_id,
+      json.taskId,
+      json.execution_id,
+      json.id,
+      json.request_id,   // 最後才 fallback 到 top-level request_id
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim();
+    }
+    return null;
+  }
+
+  async function triggerWebhook() {
+    const form = new FormData();
+    form.append('text', '請更新今日最新 AI 新聞');
+    const resp = await fetch(WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'X-QOCA-Agent-Api-Key': API_KEY,
+      },
+      body: form,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error('Webhook 失敗：HTTP ' + resp.status + (txt ? ' - ' + txt.slice(0, 200) : ''));
+    }
+    const json = await resp.json();
+    // 把完整回應印出來，方便確認真正的 task_id 欄位名稱
+    console.log('[webhook] POST response:', json);
+
+    const taskId = pickTaskId(json);
+    if (!taskId) {
+      throw new Error('Webhook 回應中找不到 task_id（請打開 console 查看回應內容）');
+    }
+    console.log('[webhook] using task_id:', taskId);
+    return taskId;
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function pollResult(requestId) {
+    const startedAt = Date.now();
+    // 觸發後給平台一點時間註冊 task，避免第一次查就拿到 404
+    await sleep(2000);
+
+    let notFoundStreak = 0;
+    const NOT_FOUND_GRACE = 20; // 約 20 * 3s = 60s 都還沒登錄才放棄
+
+    while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
+      let resp;
+      try {
+        resp = await fetch(RESULT_URL + encodeURIComponent(requestId), {
+          method: 'GET',
+          headers: {
+            'accept': 'application/json',
+            'X-QOCA-Agent-Api-Key': API_KEY,
+          },
+        });
+      } catch (netErr) {
+        // 網路波動 — 短暫重試
+        await sleep(POLL_INTERVAL_MS);
+        continue;
+      }
+
+      // 嘗試解析 JSON（即使是 4xx，平台也常回 JSON 描述狀態）
+      let json = null;
+      const rawText = await resp.text().catch(() => '');
+      try { json = rawText ? JSON.parse(rawText) : null; } catch (_) { json = null; }
+
+      const errCode = json && (json.error_code || (json.data && json.data.error_code));
+      const errMsg  = json && (json.error || (json.data && json.data.error));
+      const isNotReady =
+        resp.status === 404 ||
+        errCode === 'GET_WEBHOOK_RESULT_ERROR' ||
+        (typeof errMsg === 'string' && /not found/i.test(errMsg));
+
+      if (isNotReady) {
+        notFoundStreak++;
+        if (notFoundStreak > NOT_FOUND_GRACE) {
+          throw new Error('Task 未在平台註冊（多次查無此 request_id），請稍後再試或檢查 webhook 設定。');
+        }
+        setStatus('結果尚未就緒，繼續等待… (' + notFoundStreak + ')', '');
+        await sleep(POLL_INTERVAL_MS);
+        continue;
+      }
+
+      if (!resp.ok) {
+        throw new Error('查詢結果失敗：HTTP ' + resp.status + (rawText ? ' - ' + rawText.slice(0, 200) : ''));
+      }
+
+      // 成功 HTTP 200 — 看業務狀態
+      notFoundStreak = 0;
+      const status = ((json && json.status) || '').toLowerCase();
+      if (status === 'completed' || status === 'success') {
+        return json;
+      }
+      if (status === 'failed' || status === 'error') {
+        const reason = (json && json.data && json.data.response) || (json && json.error) || '未知錯誤';
+        throw new Error('Webhook 執行失敗：' + (typeof reason === 'string' ? reason : JSON.stringify(reason)));
+      }
+      // processing / queued / 其他 — 繼續輪詢
+      await sleep(POLL_INTERVAL_MS);
+    }
+    throw new Error('查詢逾時，請稍後再試。');
+  }
+
+  async function runUpdate() {
+    setLoading(true);
+    setStatus('正在送出請求…', '');
+    try {
+      const reqId = await triggerWebhook();
+      setStatus('已送出（' + reqId.slice(0, 8) + '…），等待結果中…', '');
+      const result = await pollResult(reqId);
+
+      const response = result && result.data && result.data.response;
+      const aiNews = response && response.ai_news;
+      const items = parseAiNews(aiNews);
+
+      if (!items.length) {
+        throw new Error('回傳資料未包含可解析的新聞。');
+      }
+
+      // 趨勢：API 沒提供時保留原文
+      const trend = (response && (response.trend || response.summary)) || null;
+      const todayStr = new Date().toLocaleDateString(locale);
+
+      renderNews(items, trend, todayStr);
+      setStatus('已更新 · ' + new Date().toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }), 'ok');
+    } catch (err) {
+      console.error(err);
+      setStatus(err.message || '更新失敗', 'err');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  updateBtn.addEventListener('click', runUpdate);
 </script>
 </body>
 </html>
